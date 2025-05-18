@@ -1,0 +1,6 @@
+
+feedparser
+pyTelegramBotAPI
+flask
+apscheduler
+beautifulsoup4

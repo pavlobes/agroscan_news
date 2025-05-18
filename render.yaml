@@ -1,0 +1,9 @@
+
+services:
+  - type: web
+    name: agroscan-news
+    env: python
+    plan: free
+    buildCommand: ""
+    startCommand: python main.py
+    autoDeploy: true
