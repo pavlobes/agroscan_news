@@ -126,9 +126,5 @@ if __name__ == "__main__":
 
 @bot.message_handler(commands=['check_now', 'перевірити', 'update'])
 def manual_check_command(message):
-    if message.chat.id == ADMIN_ID:
-        bot.send_message(message.chat.id, "🔄 Перевірка новин розпочата...")
-        send_drafts()
-    else:
-        bot.send_message(message.chat.id, "⛔ Ця команда доступна лише адміну.")
-
+    bot.send_message(message.chat.id, "🔄 Перевірка новин розпочата...")
+    send_drafts()
