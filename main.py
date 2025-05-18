@@ -12,7 +12,7 @@ import re
 TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "40152158"))
 CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "-1002591966680"))
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "secret-path")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "agroscan_secret")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -108,7 +108,7 @@ def handle_edit(message):
     bot.send_message(CHANNEL_ID, full_text, parse_mode="Markdown")
     bot.edit_message_text(chat_id=message.chat.id, message_id=original_id, text="✅ Опубліковано після редагування")
 
-@app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
+@app.route("/agroscan_secret", methods=["POST"])
 def webhook():
     update = telebot.types.Update.de_json(request.get_json(force=True))
     bot.process_new_updates([update])
@@ -119,8 +119,5 @@ def index():
     return "AgroScan новинний бот працює."
 
 if __name__ == "__main__":
-    bot.remove_webhook()
-    bot.set_webhook(url=f"{os.environ.get('WEBHOOK_URL')}/{WEBHOOK_SECRET}")
     scheduler.add_job(send_drafts, "interval", hours=1)
-    send_drafts()
     app.run(host="0.0.0.0", port=10000)
