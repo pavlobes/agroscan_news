@@ -6,10 +6,9 @@ from flask import Flask, request
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime
 from bs4 import BeautifulSoup
+import requests
 import json
-import re
 
-# Новый токен для AgroScan News Bot
 TOKEN = "7768675792:AAGwjrIvx2LaYVWBekcMRqeMayydMLmUf5s"
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "40152158"))
 CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "-1002591966680"))
@@ -20,7 +19,6 @@ app = Flask(__name__)
 scheduler = BackgroundScheduler()
 scheduler.start()
 
-RSS_FEEDS = ['https://agronews.ua/rss', 'https://latifundist.com/rss/news']
 SEEN_LINKS_FILE = "seen_links.json"
 AWAITING_EDIT = {}
 LINK_CACHE = {}
@@ -39,21 +37,20 @@ SEEN_LINKS = load_seen_links()
 
 def clean_html(text):
     soup = BeautifulSoup(text, 'html.parser')
-    clean = soup.get_text()
-    clean = re.sub(r'Continue Reading.*', '', clean).strip()
-    return clean
-
+    return soup.get_text().strip()
 
 def fetch_latifundist():
     url = "https://latifundist.com/novosti"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+    }
     response = requests.get(url, headers=headers, timeout=10)
     print("LATIFUNDIST RESPONSE SAMPLE:", response.text[:300])
     soup = BeautifulSoup(response.text, 'html.parser')
     news_blocks = soup.select(".news-block__title a")
     new_items = []
 
-    for block in news_blocks[:5]:  # Берём первые 5 новостей
+    for block in news_blocks[:5]:
         title = block.get_text(strip=True)
         link = "https://latifundist.com" + block['href']
         if link not in SEEN_LINKS:
@@ -64,17 +61,12 @@ def fetch_latifundist():
                 'desc': 'Новина з Latifundist',
                 'source': 'latifundist.com'
             })
-        news_items += fetch_latifundist()
-    return news_items
+    return new_items
 
-
-def fetch_latest_news():
-    items = []
-    for feed_url in RSS_FEEDS:
-        feed = feedparser.parse(feed_url)
-        items.extend(feed.entries)
+def fetch_agronews():
+    feed = feedparser.parse("https://agronews.ua/rss")
     new_items = []
-    for entry in items[:10]:
+    for entry in feed.entries[:5]:
         if entry.link not in SEEN_LINKS:
             SEEN_LINKS.add(entry.link)
             description = clean_html(entry.summary) if hasattr(entry, 'summary') else 'Новина з Agronews RSS'
@@ -82,31 +74,42 @@ def fetch_latest_news():
                 'title': entry.title,
                 'link': entry.link,
                 'desc': description,
-                'source': entry.link.split('/')[2]
+                'source': 'agronews.ua'
             })
+    return new_items
+
+def fetch_all_news():
+    all_news = []
+    all_news += fetch_agronews()
+    all_news += fetch_latifundist()
     save_seen_links(SEEN_LINKS)
-        news_items += fetch_latifundist()
-    return news_items
+    return all_news
 
 def format_post(news):
-    source_tag = '#agronews' if 'agronews' in news['source'] else '#latifundist'
-    return f"""🌾 AgroScan — Новина з Agronews
-
-*{news['title']}*
-
-{news['desc']}
-
-🗓 Дата: {datetime.now().strftime('%d.%m.%Y')}
-Джерело: Джерело: [Agronews.ua]({news['link']})
-{news['link']}
-
-{source_tag} #агроновини #agroscan
-"""
+    source_tag = "#agronews" if "agronews" in news["source"] else "#latifundist"
+    date_str = datetime.now().strftime("%d.%m.%Y")
+    post = (
+        "AgroScan - Новина з {source}\n\n"
+        "*{title}*\n\n"
+        "{desc}\n\n"
+        "Дата: {date}\n"
+        "Джерело: [{source}]({link})\n"
+        "{link}\n\n"
+        "{tag} #агроновини #agroscan"
+    ).format(
+        source=news["source"],
+        title=news["title"],
+        desc=news["desc"],
+        date=date_str,
+        link=news["link"],
+        tag=source_tag
+    )
+    return post
 
 def send_drafts():
-    news_items = []
-    news_items = fetch_latest_news()
+    news_items = fetch_all_news()
     if not news_items:
+        bot.send_message(ADMIN_ID, "Інфо: Новин не знайдено.")
         return
     for news in news_items:
         post = format_post(news)
@@ -131,17 +134,12 @@ def handle_decision(call):
         AWAITING_EDIT[call.message.chat.id] = call.message.message_id
         bot.send_message(call.message.chat.id, "✍️ Надішли мені новий текст посту, і я автоматично додам посилання на джерело.")
 
-@bot.message_handler(func=lambda message: message.chat.id in AWAITING_EDIT)
-def handle_edit(message):
-    original_id = AWAITING_EDIT.pop(message.chat.id)
-    link = LINK_CACHE.pop(message.chat.id, '')
-    full_text = message.text.strip()
-    if link and link not in full_text:
-        full_text += f"\n\n{link}"
-    bot.send_message(CHANNEL_ID, full_text, parse_mode="Markdown")
-    bot.edit_message_text(chat_id=message.chat.id, message_id=original_id, text="✅ Опубліковано після редагування")
+@bot.message_handler(commands=['check_now', 'перевірити', 'update'])
+def manual_check_command(message):
+    bot.send_message(message.chat.id, "🔄 Перевірка новин розпочата...")
+    send_drafts()
 
-@app.route("/agroscan_secret", methods=["POST"])
+@app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
 def webhook():
     update = telebot.types.Update.de_json(request.get_json(force=True))
     bot.process_new_updates([update])
