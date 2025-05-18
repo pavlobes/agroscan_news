@@ -20,7 +20,7 @@ app = Flask(__name__)
 scheduler = BackgroundScheduler()
 scheduler.start()
 
-RSS_FEED = 'https://agronews.ua/rss'
+RSS_FEEDS = ['https://agronews.ua/rss', 'https://latifundist.com/rss/news']
 SEEN_LINKS_FILE = "seen_links.json"
 AWAITING_EDIT = {}
 LINK_CACHE = {}
@@ -44,21 +44,26 @@ def clean_html(text):
     return clean
 
 def fetch_latest_news():
-    feed = feedparser.parse(RSS_FEED)
+    items = []
+    for feed_url in RSS_FEEDS:
+        feed = feedparser.parse(feed_url)
+        items.extend(feed.entries)
     new_items = []
-    for entry in feed.entries[:5]:
+    for entry in items[:10]:
         if entry.link not in SEEN_LINKS:
             SEEN_LINKS.add(entry.link)
             description = clean_html(entry.summary) if hasattr(entry, 'summary') else 'Новина з Agronews RSS'
             new_items.append({
                 'title': entry.title,
                 'link': entry.link,
-                'desc': description
+                'desc': description,
+                'source': entry.link.split('/')[2]
             })
     save_seen_links(SEEN_LINKS)
     return new_items
 
 def format_post(news):
+    source_tag = '#agronews' if 'agronews' in news['source'] else '#latifundist'
     return f"""🌾 AgroScan — Новина з Agronews
 
 *{news['title']}*
@@ -69,7 +74,7 @@ def format_post(news):
 🔗 Джерело: [Agronews.ua]({news['link']})
 {news['link']}
 
-#агроновини #agroscan
+{source_tag} #агроновини #agroscan
 """
 
 def send_drafts():
@@ -122,9 +127,3 @@ def index():
 if __name__ == "__main__":
     scheduler.add_job(send_drafts, "interval", hours=1)
     app.run(host="0.0.0.0", port=10000)
-
-
-@bot.message_handler(commands=['check_now', 'перевірити', 'update'])
-def manual_check_command(message):
-    bot.send_message(message.chat.id, "🔄 Перевірка новин розпочата...")
-    send_drafts()
