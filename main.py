@@ -43,6 +43,29 @@ def clean_html(text):
     clean = re.sub(r'Continue Reading.*', '', clean).strip()
     return clean
 
+
+def fetch_latifundist():
+    url = "https://latifundist.com/novosti"
+    response = requests.get(url, timeout=10)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    news_blocks = soup.select(".news-block__title a")
+    new_items = []
+
+    for block in news_blocks[:5]:  # Берём первые 5 новостей
+        title = block.get_text(strip=True)
+        link = "https://latifundist.com" + block['href']
+        if link not in SEEN_LINKS:
+            SEEN_LINKS.add(link)
+            new_items.append({
+                'title': title,
+                'link': link,
+                'desc': 'Новина з Latifundist',
+                'source': 'latifundist.com'
+            })
+        news_items += fetch_latifundist()
+    return news_items
+
+
 def fetch_latest_news():
     items = []
     for feed_url in RSS_FEEDS:
@@ -60,7 +83,8 @@ def fetch_latest_news():
                 'source': entry.link.split('/')[2]
             })
     save_seen_links(SEEN_LINKS)
-    return new_items
+        news_items += fetch_latifundist()
+    return news_items
 
 def format_post(news):
     source_tag = '#agronews' if 'agronews' in news['source'] else '#latifundist'
@@ -78,6 +102,7 @@ def format_post(news):
 """
 
 def send_drafts():
+    news_items = []
     news_items = fetch_latest_news()
     if not news_items:
         return
