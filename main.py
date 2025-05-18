@@ -9,7 +9,8 @@ from bs4 import BeautifulSoup
 import json
 import re
 
-TOKEN = os.environ.get("BOT_TOKEN")
+# Новый токен для AgroScan News Bot
+TOKEN = "7768675792:AAGwjrIvx2LaYVWBekcMRqeMayydMLmUf5s"
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "40152158"))
 CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "-1002591966680"))
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "agroscan_secret")
