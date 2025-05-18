@@ -46,7 +46,9 @@ def clean_html(text):
 
 def fetch_latifundist():
     url = "https://latifundist.com/novosti"
-    response = requests.get(url, timeout=10)
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"}
+    response = requests.get(url, headers=headers, timeout=10)
+    print("LATIFUNDIST RESPONSE SAMPLE:", response.text[:300])
     soup = BeautifulSoup(response.text, 'html.parser')
     news_blocks = soup.select(".news-block__title a")
     new_items = []
@@ -62,7 +64,7 @@ def fetch_latifundist():
                 'desc': 'Новина з Latifundist',
                 'source': 'latifundist.com'
             })
-        all_news += fetch_latifundist()
+        news_items += fetch_latifundist()
     return news_items
 
 
@@ -83,7 +85,7 @@ def fetch_latest_news():
                 'source': entry.link.split('/')[2]
             })
     save_seen_links(SEEN_LINKS)
-        all_news += fetch_latifundist()
+        news_items += fetch_latifundist()
     return news_items
 
 def format_post(news):
