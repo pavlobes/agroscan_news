@@ -62,7 +62,7 @@ def fetch_latifundist():
                 'desc': 'Новина з Latifundist',
                 'source': 'latifundist.com'
             })
-        news_items += fetch_latifundist()
+        all_news += fetch_latifundist()
     return news_items
 
 
@@ -83,7 +83,7 @@ def fetch_latest_news():
                 'source': entry.link.split('/')[2]
             })
     save_seen_links(SEEN_LINKS)
-        news_items += fetch_latifundist()
+        all_news += fetch_latifundist()
     return news_items
 
 def format_post(news):
