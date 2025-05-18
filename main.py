@@ -122,3 +122,13 @@ def index():
 if __name__ == "__main__":
     scheduler.add_job(send_drafts, "interval", hours=1)
     app.run(host="0.0.0.0", port=10000)
+
+
+@bot.message_handler(commands=['check_now', 'перевірити', 'update'])
+def manual_check_command(message):
+    if message.chat.id == ADMIN_ID:
+        bot.send_message(message.chat.id, "🔄 Перевірка новин розпочата...")
+        send_drafts()
+    else:
+        bot.send_message(message.chat.id, "⛔ Ця команда доступна лише адміну.")
+
