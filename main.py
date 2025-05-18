@@ -95,7 +95,7 @@ def format_post(news):
 {news['desc']}
 
 🗓 Дата: {datetime.now().strftime('%d.%m.%Y')}
-🔗 Джерело: [Agronews.ua]({news['link']})
+Джерело: Джерело: [Agronews.ua]({news['link']})
 {news['link']}
 
 {source_tag} #агроновини #agroscan
