@@ -1,154 +1,148 @@
 
 import os
-import feedparser
-import telebot
+import pandas as pd
 from flask import Flask, request
-from apscheduler.schedulers.background import BackgroundScheduler
+from telegram import Bot, Update
+from telegram.ext import Dispatcher, CommandHandler, MessageHandler, Filters, CallbackQueryHandler, CallbackContext
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
-from bs4 import BeautifulSoup
-import requests
-import json
 
-TOKEN = "7768675792:AAGwjrIvx2LaYVWBekcMRqeMayydMLmUf5s"
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "40152158"))
-CHANNEL_ID = int(os.environ.get("CHANNEL_ID", "-1002591966680"))
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "agroscan_secret")
-
-bot = telebot.TeleBot(TOKEN)
+TOKEN = os.environ.get("BOT_TOKEN")
+bot = Bot(token=TOKEN)
 app = Flask(__name__)
-scheduler = BackgroundScheduler()
-scheduler.start()
+dispatcher = Dispatcher(bot, None, use_context=True)
 
-SEEN_LINKS_FILE = "seen_links.json"
-AWAITING_EDIT = {}
-LINK_CACHE = {}
+PREVIOUS_FILE = "previous.xlsx"
+LATEST_FILE = "latest.xlsx"
 
-def load_seen_links():
-    if os.path.exists(SEEN_LINKS_FILE):
-        with open(SEEN_LINKS_FILE, "r") as f:
-            return set(json.load(f))
-    return set()
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text("Привіт! Надішли Excel-файл (.xlsx), і я порівняю його з попереднім.")
 
-def save_seen_links(links):
-    with open(SEEN_LINKS_FILE, "w") as f:
-        json.dump(list(links), f)
-
-SEEN_LINKS = load_seen_links()
-
-def clean_html(text):
-    soup = BeautifulSoup(text, 'html.parser')
-    return soup.get_text().strip()
-
-def fetch_latifundist():
-    url = "https://latifundist.com/novosti"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-    }
-    response = requests.get(url, headers=headers, timeout=10)
-    print("LATIFUNDIST RESPONSE SAMPLE:", response.text[:300])
-    soup = BeautifulSoup(response.text, 'html.parser')
-    news_blocks = soup.select(".news-block__title a")
-    new_items = []
-
-    for block in news_blocks[:5]:
-        title = block.get_text(strip=True)
-        link = "https://latifundist.com" + block['href']
-        if link not in SEEN_LINKS:
-            SEEN_LINKS.add(link)
-            new_items.append({
-                'title': title,
-                'link': link,
-                'desc': 'Новина з Latifundist',
-                'source': 'latifundist.com'
-            })
-    return new_items
-
-def fetch_agronews():
-    feed = feedparser.parse("https://agronews.ua/rss")
-    new_items = []
-    for entry in feed.entries[:5]:
-        if entry.link not in SEEN_LINKS:
-            SEEN_LINKS.add(entry.link)
-            description = clean_html(entry.summary) if hasattr(entry, 'summary') else 'Новина з Agronews RSS'
-            new_items.append({
-                'title': entry.title,
-                'link': entry.link,
-                'desc': description,
-                'source': 'agronews.ua'
-            })
-    return new_items
-
-def fetch_all_news():
-    all_news = []
-    all_news += fetch_agronews()
-    all_news += fetch_latifundist()
-    save_seen_links(SEEN_LINKS)
-    return all_news
-
-def format_post(news):
-    source_tag = "#agronews" if "agronews" in news["source"] else "#latifundist"
-    date_str = datetime.now().strftime("%d.%m.%Y")
-    post = (
-        "AgroScan - Новина з {source}\n\n"
-        "*{title}*\n\n"
-        "{desc}\n\n"
-        "Дата: {date}\n"
-        "Джерело: [{source}]({link})\n"
-        "{link}\n\n"
-        "{tag} #агроновини #agroscan"
-    ).format(
-        source=news["source"],
-        title=news["title"],
-        desc=news["desc"],
-        date=date_str,
-        link=news["link"],
-        tag=source_tag
-    )
-    return post
-
-def send_drafts():
-    news_items = fetch_all_news()
-    if not news_items:
-        bot.send_message(ADMIN_ID, "Інфо: Новин не знайдено.")
+def handle_file(update: Update, context: CallbackContext):
+    document = update.message.document
+    if not document.file_name.endswith('.xlsx'):
+        update.message.reply_text("Будь ласка, надішли Excel-файл з розширенням .xlsx")
         return
-    for news in news_items:
-        post = format_post(news)
-        markup = telebot.types.InlineKeyboardMarkup()
-        markup.add(
-            telebot.types.InlineKeyboardButton("✅ Публікувати", callback_data='post'),
-            telebot.types.InlineKeyboardButton("❌ Відхилити", callback_data='cancel'),
-            telebot.types.InlineKeyboardButton("📝 Редагувати", callback_data='edit')
-        )
-        msg = bot.send_message(ADMIN_ID, post, parse_mode="Markdown", reply_markup=markup)
-        LINK_CACHE[msg.chat.id] = news['link']
 
-@bot.callback_query_handler(func=lambda call: call.data in ['post', 'cancel', 'edit'])
-def handle_decision(call):
-    if call.data == 'post':
-        text = call.message.text
-        bot.send_message(CHANNEL_ID, text, parse_mode="Markdown")
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="✅ Опубліковано")
-    elif call.data == 'cancel':
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="❌ Скасовано")
-    elif call.data == 'edit':
-        AWAITING_EDIT[call.message.chat.id] = call.message.message_id
-        bot.send_message(call.message.chat.id, "✍️ Надішли мені новий текст посту, і я автоматично додам посилання на джерело.")
+    file = document.get_file()
+    file.download(LATEST_FILE)
 
-@bot.message_handler(commands=['check_now', 'перевірити', 'update'])
-def manual_check_command(message):
-    bot.send_message(message.chat.id, "🔄 Перевірка новин розпочата...")
-    send_drafts()
+    if not os.path.exists(PREVIOUS_FILE):
+        os.rename(LATEST_FILE, PREVIOUS_FILE)
+        update.message.reply_text("Перший файл збережено. Надішли ще один для порівняння.")
+        return
 
-@app.route(f"/{WEBHOOK_SECRET}", methods=["POST"])
+    text = get_diff_text(pd.read_excel(PREVIOUS_FILE), pd.read_excel(LATEST_FILE))
+    context.user_data['post_text'] = text
+
+    keyboard = [[
+        InlineKeyboardButton("✅ Публікувати", callback_data='publish'),
+        InlineKeyboardButton("📝 Редагувати", callback_data='edit'),
+        InlineKeyboardButton("❌ Скасувати", callback_data='cancel')
+    ]]
+    update.message.reply_text(text or "Змін не знайдено.", reply_markup=InlineKeyboardMarkup(keyboard))
+
+    os.replace(LATEST_FILE, PREVIOUS_FILE)
+
+def get_diff_text(old_df, new_df):
+    try:
+        old_df.columns = ["Назва", "Регіон", "Ціна", "Публікувати"]
+        new_df.columns = ["Назва", "Регіон", "Ціна", "Публікувати"]
+
+        old_df["Ціна"] = pd.to_numeric(old_df["Ціна"], errors="coerce")
+        new_df["Ціна"] = pd.to_numeric(new_df["Ціна"], errors="coerce")
+        old_df["Назва"] = old_df["Назва"].str.strip()
+        new_df["Назва"] = new_df["Назва"].str.strip()
+        old_df["Регіон"] = old_df["Регіон"].str.strip()
+        new_df["Регіон"] = new_df["Регіон"].str.strip()
+
+        old_df["id"] = old_df["Назва"] + " | " + old_df["Регіон"]
+        new_df["id"] = new_df["Назва"] + " | " + new_df["Регіон"]
+
+        merged = pd.merge(old_df, new_df, on="id", how="outer", suffixes=("_старе", "_нове"))
+        merged["Δ"] = merged["Ціна_нове"] - merged["Ціна_старе"]
+
+        def status(row):
+            if pd.isna(row["Ціна_старе"]):
+                return "🆕"
+            elif row["Δ"] > 0:
+                return "🔼"
+            elif row["Δ"] < 0:
+                return "🔽"
+            elif str(row.get("Публікувати_нове", "")).strip() == "+":
+                return "✅"
+            else:
+                return None
+
+        merged["Статус"] = merged.apply(status, axis=1)
+        filtered = merged[merged["Статус"].notna()].copy()
+
+        lines = []
+        for _, row in filtered.iterrows():
+            name = row.get("Назва_нове") or row.get("Назва_старе")
+            region = row.get("Регіон_нове") or row.get("Регіон_старе")
+            price = row.get("Ціна_нове")
+            mark = row["Статус"]
+            lines.append(f"{mark} {name} | {region}: {price:.0f} грн з ПДВ")
+
+        today = datetime.now().strftime("%d.%m.%Y")
+        message_lines = []
+        message_lines.append(f"Доброго дня! ТОВ "Хиллс Трейд", Оновлення цін на {today}:")
+        message_lines.append("")
+        message_lines.extend(lines)
+        message_lines.append("")
+        message_lines.append("Можлива доставка у ваш регіон або склад, за деталями звертайтесь до менеджера.")
+        message_lines.append("")
+        message_lines.append("Контакти менеджерів:")
+        message_lines.append("📞 Інна — +38 (095) 502-22-87 • @kipish_maker2")
+        message_lines.append("📞 Павло — +38 (067) 519-36-86 • @Pawa_fbc")
+        message_lines.append("📧 office@hillstrade.com.ua")
+
+        return "
+".join(message_lines)
+
+    except Exception as e:
+        return f"Помилка під час обробки: {e}"
+
+def handle_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    data = query.data
+    if data == 'publish':
+        text = context.user_data.get('post_text', '')
+        if text:
+            for channel_id in os.environ.get("CHANNEL_IDS", "").split(","):
+                try:
+                    bot.send_message(chat_id=int(channel_id.strip()), text=text)
+                except Exception as e:
+                    print(f"Помилка надсилання в канал {channel_id}: {e}")
+            query.edit_message_text("✅ Опубліковано.")
+    elif data == 'edit':
+        query.edit_message_text("✏️ Надішли новий текст для публікації.")
+    elif data == 'cancel':
+        query.edit_message_text("❌ Скасовано.")
+
+def handle_edit(update: Update, context: CallbackContext):
+    context.user_data['post_text'] = update.message.text
+    keyboard = [[
+        InlineKeyboardButton("✅ Публікувати", callback_data='publish'),
+        InlineKeyboardButton("❌ Скасувати", callback_data='cancel')
+    ]]
+    update.message.reply_text("Оновлений текст збережено. Підтвердь публікацію:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(MessageHandler(Filters.document.file_extension("xlsx"), handle_file))
+dispatcher.add_handler(CallbackQueryHandler(handle_callback))
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_edit))
+
+@app.route("/webhook", methods=["POST"])
 def webhook():
-    update = telebot.types.Update.de_json(request.get_json(force=True))
-    bot.process_new_updates([update])
+    update = Update.de_json(request.get_json(force=True), bot)
+    dispatcher.process_update(update)
     return "ok"
 
 @app.route("/")
 def index():
-    return "AgroScan новинний бот працює."
+    return "Бот працює!"
 
 if __name__ == "__main__":
-    scheduler.add_job(send_drafts, "interval", hours=1)
     app.run(host="0.0.0.0", port=10000)
